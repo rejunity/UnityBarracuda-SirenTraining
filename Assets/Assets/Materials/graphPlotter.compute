@@ -1,0 +1,76 @@
+#pragma kernel CSMain
+
+StructuredBuffer<float> graphBuffer;
+RWTexture2D<float3> graphTexture;
+int graphDimX;
+int graphDimY;
+int graphBufferTotalCount;
+int graphBufferValueCount;
+float maxValue;
+float4 backgroundColor;
+float4 lossColor;
+
+// somewhat inspired by https://www.shadertoy.com/view/XdGGWW
+float plotGrid(float2 uv)
+{
+    maxValue = min(1.25, maxValue);
+    if (uv.y > 1)
+        return 0;
+
+    float c = 0;
+    c += float(abs(uv.y - 0) < (1.0 / graphDimY)); // 0
+    for (float h = 2.; h < 12.; h++)
+    {
+        float i = pow(2., h);
+        float y = pow((1. / i) / maxValue, 0.5);
+
+        c += (1./i)*float(frac((uv.x*i)-((1*i)/graphDimY)) > frac((uv.x*i)));
+
+        //float y = saturate((maxValue*1.5)/(log(maxValue/(h + 1e-4)))); //pow(h/maxValue, 0.5);
+        //c += (4. / pow(i,0.75)) * float(abs(uv.y - y) < (1.0 / graphDimY));
+        c += (1. / pow(1.75, max(0,h-3))) * float(abs(uv.y - y) < (1.0 / graphDimY));
+    }
+    return c;
+}
+
+float cubicInterpolateClamped(StructuredBuffer<float> p, int totalCount, int valueCount, float t)
+{
+    t *= (float)(totalCount - 1);
+
+    int index = floor(t);
+    float x = frac(t);
+
+    int i0 = min(max(0, index + 0), valueCount - 1);
+    int i1 = min(max(0, index + 1), valueCount - 1);
+    int i2 = min(max(0, index + 2), valueCount - 1);
+    int i3 = min(max(0, index + 3), valueCount - 1);
+
+    maxValue = min(1.25, maxValue);
+    float p0 = pow(p[i0]/maxValue, 0.5);//saturate((maxValue*1.5)/(log(maxValue/(p[i0] + 1e-4))));
+    float p1 = pow(p[i1]/maxValue, 0.5);//saturate((maxValue*1.5)/(log(maxValue/(p[i1] + 1e-4))));
+    float p2 = pow(p[i2]/maxValue, 0.5);//saturate((maxValue*1.5)/(log(maxValue/(p[i2] + 1e-4))));
+    float p3 = pow(p[i3]/maxValue, 0.5);//saturate((maxValue*1.5)/(log(maxValue/(p[i3] + 1e-4))));
+
+
+    if (index >= max(1, valueCount - 2))
+        return 0;
+    else
+        return p1 +
+            0.5 * x*(p2 - p0 +
+                x*(2.0*p0 - 5.0*p1 + 4.0*p2 - p3 +
+                    x*(3.0*(p1 - p2) + p3 - p0)));
+}
+
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    graphTexture[id.xy] = backgroundColor.rgb;//float3(0,0,0);
+
+    float2 uv = float2(id.x, id.y) / float2(graphDimX, graphDimY);
+    float value = cubicInterpolateClamped(graphBuffer, graphBufferTotalCount, graphBufferValueCount, uv.x);
+
+    float height = uv.y;
+    graphTexture[id.xy] = lerp (graphTexture[id.xy], float3(1,1,1), min(0.5, plotGrid(uv)));
+    graphTexture[id.xy] = lerp (graphTexture[id.xy], lossColor.rgb, (height < value));
+}
